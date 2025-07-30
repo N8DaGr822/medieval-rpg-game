@@ -725,6 +725,16 @@ const Game = {
         
         setTimeout(() => {
             game.currentLevel++;
+            
+            // Check if player has reached the final level (100)
+            if (game.currentLevel > 100) {
+                UI.showPopup(game.canvas.width/2, game.canvas.height/2, '🎉 CONGRATULATIONS! You have completed all 100 levels! 🎉', '#ffaa00');
+                setTimeout(() => {
+                    UI.showPopup(game.canvas.width/2, game.canvas.height/2, 'You are the ultimate champion!', '#00ff00');
+                }, 3000);
+                return;
+            }
+            
             game.enemiesPerLevel = Math.min(10, 5 + Math.floor(game.currentLevel / 2));
             UI.showPopup(game.canvas.width/2, game.canvas.height/2, `Dungeon Level ${game.currentLevel}`, '#ffaa00');
             
@@ -740,7 +750,9 @@ const Game = {
             game.platforms = [];
             game.castle = null;
             game.levelStarted = false;
-            game.gameState = 'waiting';
+            
+            // Automatically start the next level
+            Game.startLevel();
             
             UI.update();
         }, 2000);

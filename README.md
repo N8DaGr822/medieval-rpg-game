@@ -7,7 +7,7 @@ A browser-based 2D RPG game built with **Blazor WebAssembly** featuring an inter
 ### Core Gameplay
 - **2D Platformer Mechanics**: Jump, move, and fight enemies
 - **Combat System**: Melee attacks, magic spells, and projectile combat
-- **Level Progression**: Advance through increasingly difficult dungeon levels
+- **Level Progression**: Advance through 100 increasingly difficult dungeon levels
 - **Enemy AI**: Intelligent enemies with different behaviors and attack patterns
 
 ### Inventory System
@@ -100,7 +100,7 @@ GameMarioDiff/
 2. **Movement**: Use WASD or arrow keys to move
 3. **Combat**: Click to attack enemies, use magic for ranged attacks
 4. **Inventory**: Click the 📦 button to open inventory
-5. **Progression**: Defeat enemies and reach the castle to advance levels
+5. **Progression**: Defeat enemies and reach the castle to advance levels (100 total levels)
 6. **Items**: Unlock new weapons and armor as you level up
 
 ## 🔧 Development
