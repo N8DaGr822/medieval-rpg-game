@@ -1,0 +1,278 @@
+@inject IJSRuntime JSRuntime
+
+<div id="inventoryPanel" class="inventory-panel @(IsVisible ? "visible" : "")">
+    <div class="inventory-header">
+        <h3>Inventory</h3>
+        <button class="close-btn" @onclick="ToggleInventory">×</button>
+    </div>
+    
+    <div class="inventory-content">
+        <div class="inventory-section">
+            <h4>Weapons</h4>
+            <div class="item-grid">
+                @foreach (var weapon in Weapons)
+                {
+                    var isUnlocked = PlayerLevel >= weapon.RequiredLevel;
+                    <div class="item-slot @(weapon.IsEquipped ? "equipped" : "") @(isUnlocked ? "" : "locked")" @onclick="() => EquipWeapon(weapon)">
+                        <div class="item-icon">⚔</div>
+                        <div class="item-name">@weapon.Name</div>
+                        <div class="item-stats">DMG: @weapon.Damage</div>
+                        @if (!isUnlocked)
+                        {
+                            <div class="item-lock">🔒 Level @weapon.RequiredLevel</div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+        
+        <div class="inventory-section">
+            <h4>Armor</h4>
+            <div class="item-grid">
+                @foreach (var armor in Armor)
+                {
+                    var isUnlocked = PlayerLevel >= armor.RequiredLevel;
+                    <div class="item-slot @(armor.IsEquipped ? "equipped" : "") @(isUnlocked ? "" : "locked")" @onclick="() => EquipArmor(armor)">
+                        <div class="item-icon">🛡</div>
+                        <div class="item-name">@armor.Name</div>
+                        <div class="item-stats">DEF: @armor.Defense</div>
+                        @if (!isUnlocked)
+                        {
+                            <div class="item-lock">🔒 Level @armor.RequiredLevel</div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+        
+        <div class="inventory-section">
+            <h4>Consumables</h4>
+            <div class="item-grid">
+                @foreach (var item in Consumables)
+                {
+                    var isUnlocked = PlayerLevel >= item.RequiredLevel;
+                    <div class="item-slot @(isUnlocked ? "" : "locked")" @onclick="() => UseItem(item)">
+                        <div class="item-icon">@item.Icon</div>
+                        <div class="item-name">@item.Name</div>
+                        <div class="item-count">x@item.Count</div>
+                        @if (!isUnlocked)
+                        {
+                            <div class="item-lock">🔒 Level @item.RequiredLevel</div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+        
+        <div class="inventory-section">
+            <h4>Magic Items</h4>
+            <div class="item-grid">
+                @foreach (var item in MagicItems)
+                {
+                    var isUnlocked = PlayerLevel >= item.RequiredLevel;
+                    <div class="item-slot @(isUnlocked ? "" : "locked")" @onclick="() => UseMagicItem(item)">
+                        <div class="item-icon">@item.Icon</div>
+                        <div class="item-name">@item.Name</div>
+                        <div class="item-description">@item.Description</div>
+                        @if (!isUnlocked)
+                        {
+                            <div class="item-lock">🔒 Level @item.RequiredLevel</div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public bool IsVisible { get; set; } = false;
+    [Parameter] public EventCallback<bool> IsVisibleChanged { get; set; }
+    [Parameter] public int PlayerLevel { get; set; } = 1;
+    
+    // Use readonly collections for better performance
+    public IReadOnlyList<Weapon> Weapons => _weapons.AsReadOnly();
+    public IReadOnlyList<ArmorItem> Armor => _armor.AsReadOnly();
+    public IReadOnlyList<Consumable> Consumables => _consumables.AsReadOnly();
+    public IReadOnlyList<MagicItem> MagicItems => _magicItems.AsReadOnly();
+    
+    private readonly List<Weapon> _weapons = new();
+    private readonly List<ArmorItem> _armor = new();
+    private readonly List<Consumable> _consumables = new();
+    private readonly List<MagicItem> _magicItems = new();
+    
+    // Cache for unlocked items to avoid repeated calculations
+    private readonly Dictionary<int, bool> _unlockedCache = new();
+    
+    protected override void OnInitialized()
+    {
+        InitializeDefaultItems();
+    }
+    
+    protected override void OnParametersSet()
+    {
+        // Clear cache when player level changes
+        _unlockedCache.Clear();
+    }
+    
+    private bool IsItemUnlocked(int requiredLevel)
+    {
+        if (_unlockedCache.TryGetValue(requiredLevel, out bool isUnlocked))
+        {
+            return isUnlocked;
+        }
+        
+        isUnlocked = PlayerLevel >= requiredLevel;
+        _unlockedCache[requiredLevel] = isUnlocked;
+        return isUnlocked;
+    }
+    
+    private void InitializeDefaultItems()
+    {
+        // Default weapons
+        _weapons.AddRange(new List<Weapon>
+        {
+            new Weapon { Name = "Rusty Sword", Damage = 5, IsEquipped = true, RequiredLevel = 1 },
+            new Weapon { Name = "Iron Sword", Damage = 8, IsEquipped = false, RequiredLevel = 3 },
+            new Weapon { Name = "Steel Sword", Damage = 12, IsEquipped = false, RequiredLevel = 5 },
+            new Weapon { Name = "Magic Blade", Damage = 15, IsEquipped = false, RequiredLevel = 7 }
+        });
+        
+        // Default armor
+        _armor.AddRange(new List<ArmorItem>
+        {
+            new ArmorItem { Name = "Leather Armor", Defense = 3, IsEquipped = true, RequiredLevel = 1 },
+            new ArmorItem { Name = "Chain Mail", Defense = 6, IsEquipped = false, RequiredLevel = 4 },
+            new ArmorItem { Name = "Plate Armor", Defense = 10, IsEquipped = false, RequiredLevel = 6 }
+        });
+        
+        // Default consumables
+        _consumables.AddRange(new List<Consumable>
+        {
+            new Consumable { Name = "Health Potion", Icon = "🧪", Count = 5, Effect = "Restore 50 HP", RequiredLevel = 1 },
+            new Consumable { Name = "Mana Potion", Icon = "🔮", Count = 3, Effect = "Restore 30 MP", RequiredLevel = 2 },
+            new Consumable { Name = "Strength Potion", Icon = "💪", Count = 2, Effect = "Boost damage for 30s", RequiredLevel = 4 }
+        });
+        
+        // Default magic items
+        _magicItems.AddRange(new List<MagicItem>
+        {
+            new MagicItem { Name = "Fire Scroll", Icon = "🔥", Description = "Cast fireball spell", RequiredLevel = 3 },
+            new MagicItem { Name = "Ice Scroll", Icon = "❄", Description = "Cast ice spell", RequiredLevel = 5 },
+            new MagicItem { Name = "Lightning Scroll", Icon = "⚡", Description = "Cast lightning spell", RequiredLevel = 8 }
+        });
+    }
+    
+    private async Task ToggleInventory()
+    {
+        IsVisible = !IsVisible;
+        await IsVisibleChanged.InvokeAsync(IsVisible);
+        
+        if (IsVisible)
+        {
+            await JSRuntime.InvokeVoidAsync("showInventory");
+        }
+        else
+        {
+            await JSRuntime.InvokeVoidAsync("hideInventory");
+        }
+    }
+    
+    private async Task EquipWeapon(Weapon weapon)
+    {
+        if (!IsItemUnlocked(weapon.RequiredLevel))
+        {
+            await JSRuntime.InvokeVoidAsync("showPopup", $"Requires Level {weapon.RequiredLevel}!", "#ff4444");
+            return;
+        }
+        
+        // Unequip all weapons first
+        foreach (var w in _weapons)
+        {
+            w.IsEquipped = false;
+        }
+        
+        weapon.IsEquipped = true;
+        await JSRuntime.InvokeVoidAsync("equipWeapon", weapon.Name, weapon.Damage);
+        StateHasChanged();
+    }
+    
+    private async Task EquipArmor(ArmorItem armor)
+    {
+        if (!IsItemUnlocked(armor.RequiredLevel))
+        {
+            await JSRuntime.InvokeVoidAsync("showPopup", $"Requires Level {armor.RequiredLevel}!", "#ff4444");
+            return;
+        }
+        
+        // Unequip all armor first
+        foreach (var a in _armor)
+        {
+            a.IsEquipped = false;
+        }
+        
+        armor.IsEquipped = true;
+        await JSRuntime.InvokeVoidAsync("equipArmor", armor.Name, armor.Defense);
+        StateHasChanged();
+    }
+    
+    private async Task UseItem(Consumable item)
+    {
+        if (!IsItemUnlocked(item.RequiredLevel))
+        {
+            await JSRuntime.InvokeVoidAsync("showPopup", $"Requires Level {item.RequiredLevel}!", "#ff4444");
+            return;
+        }
+        
+        if (item.Count > 0)
+        {
+            item.Count--;
+            await JSRuntime.InvokeVoidAsync("useItem", item.Name, item.Effect);
+            StateHasChanged();
+        }
+    }
+    
+    private async Task UseMagicItem(MagicItem item)
+    {
+        if (!IsItemUnlocked(item.RequiredLevel))
+        {
+            await JSRuntime.InvokeVoidAsync("showPopup", $"Requires Level {item.RequiredLevel}!", "#ff4444");
+            return;
+        }
+        
+        await JSRuntime.InvokeVoidAsync("useMagicItem", item.Name, item.Description);
+    }
+    
+    public class Weapon
+    {
+        public string Name { get; set; } = "";
+        public int Damage { get; set; }
+        public bool IsEquipped { get; set; }
+        public int RequiredLevel { get; set; } = 1;
+    }
+    
+    public class ArmorItem
+    {
+        public string Name { get; set; } = "";
+        public int Defense { get; set; }
+        public bool IsEquipped { get; set; }
+        public int RequiredLevel { get; set; } = 1;
+    }
+    
+    public class Consumable
+    {
+        public string Name { get; set; } = "";
+        public string Icon { get; set; } = "";
+        public int Count { get; set; }
+        public string Effect { get; set; } = "";
+        public int RequiredLevel { get; set; } = 1;
+    }
+    
+    public class MagicItem
+    {
+        public string Name { get; set; } = "";
+        public string Icon { get; set; } = "";
+        public string Description { get; set; } = "";
+        public int RequiredLevel { get; set; } = 1;
+    }
+} 

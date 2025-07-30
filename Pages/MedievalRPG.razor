@@ -1,0 +1,366 @@
+@page "/medieval-rpg"
+@inject IJSRuntime JSRuntime
+
+<PageTitle>Medieval RPG</PageTitle>
+
+<div id="gameContainer">
+    <Inventory @bind-IsVisible="inventoryVisible" PlayerLevel="@GameState.PlayerLevel" />
+    <canvas id="gameCanvas"></canvas>
+    <div id="ui">
+        <div id="hud" class="hud-panel">
+            <div>Knight Level: <span id="level">1</span></div>
+            <div>Dungeon Level: <span id="dungeonLevel">1</span></div>
+            <div>Enemies: <span id="enemiesLeft">5</span> remaining</div>
+            <div>Health: <span id="health">100</span>/100</div>
+            <div class="bar"><div id="healthFill" class="bar-fill" style="width: 100%"></div></div>
+            <div>Mana: <span id="mana">50</span>/50</div>
+            <div class="bar"><div id="manaFill" class="bar-fill" style="width: 100%"></div></div>
+            <div>EXP: <span id="exp">0</span>/<span id="expNext">100</span></div>
+            <div class="bar"><div id="expFill" class="bar-fill" style="width: 0%"></div></div>
+            <div>Gold: <span id="gold">0</span> | Potions: <span id="potions">3</span></div>
+        </div>
+        <button id="inventoryBtn" @onclick="ToggleInventory">📦</button>
+        <button id="startBtn" @onclick="StartLevel">Start Level 1</button>
+    </div>
+    
+    <div id="mobileControls">
+        <div id="dpad">
+            <div id="moveLeft" class="control-btn">←</div>
+            <div id="moveRight" class="control-btn">→</div>
+            <div id="moveUp" class="control-btn">↑</div>
+        </div>
+        <div id="actionButtons">
+            <div id="attackBtn" class="control-btn">⚔</div>
+            <div id="magicBtn" class="control-btn">🔥</div>
+            <div id="potionBtn" class="control-btn">🧪</div>
+        </div>
+    </div>
+</div>
+
+<style>
+    * { 
+        margin: 0; 
+        padding: 0; 
+        box-sizing: border-box; 
+    }
+    
+    body {  
+        font-family: 'Courier New', monospace;
+        background: linear-gradient(135deg, #2c1810, #4a3728);
+        overflow: hidden;
+        user-select: none;
+    }
+    
+    #gameContainer {  
+        position: relative;
+        width: 100vw;
+        height: 100vh;
+        background: linear-gradient(to bottom, #87CEEB 0%, #98FB98 70%, #228B22 100%);
+    }
+    
+    #gameCanvas { 
+        display: block; 
+        width: 100%;
+        height: calc(100vh - 200px); /* Reserve space for mobile controls */
+    }
+    
+    #ui { 
+        position: absolute; 
+        top: 0; 
+        left: 0; 
+        width: 100%; 
+        height: 100%; 
+        pointer-events: none; 
+        z-index: 10; 
+    }
+    
+    .hud-panel {
+        position: absolute;
+        background: rgba(0, 0, 0, 0.8);
+        padding: 10px;
+        border-radius: 10px;
+        color: #fff;
+        border: 2px solid #8B4513;
+        pointer-events: auto;
+        font-size: 12px;
+    }
+    
+    #hud { 
+        top: 20px; 
+        left: 20px; 
+    }
+    
+    .bar {
+        width: 150px;
+        height: 15px;
+        background: #333;
+        border: 2px solid #8B4513;
+        border-radius: 10px;
+        overflow: hidden;
+        margin: 3px 0;
+    }
+    
+    .bar-fill {
+        height: 100%;
+        transition: width 0.3s ease;
+    }
+    
+    #healthFill { 
+        background: linear-gradient(90deg, #ff4444, #ff6666); 
+    }
+    
+    #manaFill { 
+        background: linear-gradient(90deg, #4444ff, #6666ff); 
+    }
+    
+    #expFill { 
+        background: linear-gradient(90deg, #ffaa00, #ffcc44); 
+    }
+    
+    .control-btn {
+        position: absolute;
+        background: rgba(0, 0, 0, 0.6);
+        border: 3px solid #8B4513;
+        border-radius: 50%;
+        color: white;
+        font-weight: bold;
+        font-size: 18px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        pointer-events: auto;
+        transition: all 0.1s ease;
+    }
+    
+    .control-btn:active, .control-btn.pressed {
+        background: rgba(139, 69, 19, 0.8);
+        transform: scale(0.95);
+    }
+    
+    #mobileControls { 
+        position: absolute; 
+        bottom: 0; 
+        left: 0; 
+        width: 100%; 
+        height: 200px; 
+        pointer-events: none; 
+        z-index: 15; 
+        background: rgba(0, 0, 0, 0.3); /* Add subtle background for better visibility */
+    }
+    
+    #dpad { 
+        position: absolute; 
+        bottom: 20px; 
+        left: 20px; 
+        width: 140px; 
+        height: 140px; 
+    }
+    
+    #moveLeft { 
+        width: 60px; 
+        height: 60px; 
+        left: 0; 
+        top: 40px; 
+    }
+    
+    #moveRight { 
+        width: 60px; 
+        height: 60px; 
+        right: 0; 
+        top: 40px; 
+    }
+    
+    #moveUp { 
+        width: 60px; 
+        height: 60px; 
+        left: 40px; 
+        top: 0; 
+    }
+    
+    #actionButtons { 
+        position: absolute; 
+        bottom: 20px; 
+        right: 20px; 
+        width: 200px; 
+        height: 140px; 
+    }
+    
+    #attackBtn { 
+        width: 70px; 
+        height: 70px; 
+        bottom: 0; 
+        right: 70px; 
+        background: rgba(255, 0, 0, 0.6); 
+    }
+    
+    #magicBtn { 
+        width: 60px; 
+        height: 60px; 
+        bottom: 80px; 
+        right: 0; 
+        background: rgba(0, 0, 255, 0.6); 
+        font-size: 16px; 
+    }
+    
+    #potionBtn { 
+        width: 60px; 
+        height: 60px; 
+        bottom: 80px; 
+        right: 140px; 
+        background: rgba(0, 255, 0, 0.6); 
+        font-size: 16px; 
+    }
+    
+    #startBtn {
+        position: absolute;
+        top: 70px;
+        right: 20px;
+        background: rgba(139, 69, 19, 0.9);
+        color: white;
+        border: none;
+        padding: 10px 20px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-family: 'Courier New', monospace;
+        font-weight: bold;
+        pointer-events: auto;
+        z-index: 16;
+        transition: all 0.2s ease;
+    }
+    
+    #startBtn:hover {
+        background: rgba(139, 69, 19, 1);
+        transform: scale(1.05);
+    }
+    
+    #inventoryBtn {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        background: rgba(139, 69, 19, 0.9);
+        color: white;
+        border: none;
+        padding: 10px 15px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-family: 'Courier New', monospace;
+        font-weight: bold;
+        font-size: 18px;
+        pointer-events: auto;
+        z-index: 16;
+        transition: all 0.2s ease;
+    }
+    
+    #inventoryBtn:hover {
+        background: rgba(139, 69, 19, 1);
+        transform: scale(1.05);
+    }
+    
+    .popup {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 24px;
+        font-weight: bold;
+        pointer-events: none;
+        z-index: 30;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+    }
+    
+    @@media (min-width: 768px) {
+        #mobileControls { 
+            display: none; 
+        }
+        
+        #gameCanvas {
+            height: 100vh; /* Full height on desktop */
+        }
+        
+        .hud-panel { 
+            padding: 15px; 
+            font-size: 14px; 
+        }
+        
+        .bar { 
+            width: 200px; 
+            height: 20px; 
+            margin: 5px 0; 
+        }
+        
+        #startBtn { 
+            top: 70px; 
+        }
+        
+        #inventoryBtn { 
+            top: 20px; 
+            right: 20px; 
+        }
+    }
+</style>
+
+@code {
+    private bool inventoryVisible = false;
+    private PlayerGameState GameState { get; set; } = new();
+    
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await JSRuntime.InvokeVoidAsync("initMedievalRPG");
+            await LoadGameState();
+        }
+    }
+    
+    private void ToggleInventory()
+    {
+        inventoryVisible = !inventoryVisible;
+        StateHasChanged();
+    }
+    
+    private async Task StartLevel()
+    {
+        await JSRuntime.InvokeVoidAsync("startLevel");
+    }
+    
+    private async Task LoadGameState()
+    {
+        try
+        {
+            var savedState = await JSRuntime.InvokeAsync<string>("localStorage.getItem", "gameState");
+            if (!string.IsNullOrEmpty(savedState))
+            {
+                GameState = System.Text.Json.JsonSerializer.Deserialize<PlayerGameState>(savedState) ?? new PlayerGameState();
+            }
+        }
+        catch
+        {
+            // If loading fails, use default state
+            GameState = new PlayerGameState();
+        }
+    }
+    
+    private async Task SaveGameState()
+    {
+        try
+        {
+            var stateJson = System.Text.Json.JsonSerializer.Serialize(GameState);
+            await JSRuntime.InvokeVoidAsync("localStorage.setItem", "gameState", stateJson);
+        }
+        catch
+        {
+            // Handle save failure gracefully
+        }
+    }
+    
+    public class PlayerGameState
+    {
+        public int PlayerLevel { get; set; } = 1;
+        public int CurrentDungeonLevel { get; set; } = 1;
+        public int TotalGold { get; set; } = 0;
+        public int TotalEnemiesKilled { get; set; } = 0;
+        public DateTime LastSaveTime { get; set; } = DateTime.Now;
+        public Dictionary<string, int> ItemCounts { get; set; } = new();
+        public List<string> UnlockedItems { get; set; } = new();
+    }
+} 
