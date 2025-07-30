@@ -3,6 +3,718 @@
 
 <PageTitle>Medieval RPG</PageTitle>
 
+<script>
+// Prevent multiple executions
+if (typeof window.gameInitialized === 'undefined') {
+    window.gameInitialized = true;
+    
+    console.log('Game JavaScript loading...');
+
+    // Game Constants
+    const GAME_CONFIG = {
+        GRAVITY: 0.5,
+        JUMP_FORCE: -12,
+        PLAYER_SPEED: 5,
+        ENEMY_CHASE_SPEED: 1.2,
+        ENEMY_PATROL_SPEED: 0.5,
+        FRICTION: 0.9,
+        ATTACK_RANGE: 60,
+        MAGIC_COST: 10,
+        POTION_HEAL: 30,
+        PROJECTILE_LIFE: 120,
+        SPAWN_DISTANCE: 200,
+        AGGRO_RANGE: 100,
+        ATTACK_COOLDOWN: 30,
+        MAGIC_COOLDOWN: 60,
+        ENEMY_ATTACK_COOLDOWN: 90,
+        ENEMY_ATTACK_RANGE: 45,
+        ENEMY_DAMAGE: 10,
+        KNOCKBACK_FORCE: 3,
+        PROJECTILE_KNOCKBACK: 4,
+        TARGET_FPS: 60,
+        MAX_ENEMIES: 20,
+        MAX_PROJECTILES: 50,
+        RENDER_DISTANCE: 800
+    };
+
+    // Game State
+    const game = {
+        canvas: null,
+        ctx: null,
+        player: {
+            x: 100, y: 300, w: 40, h: 50,
+            vx: 0, vy: 0, grounded: false,
+            facing: 1, attacking: false,
+            health: 100, maxHealth: 100,
+            mana: 50, maxMana: 50,
+            level: 1, exp: 0, expNext: 100,
+            gold: 0, potions: 3,
+            attackCooldown: 0, magicCooldown: 0,
+            meleeDamage: 20, magicDamage: 25
+        },
+        enemies: [],
+        projectiles: [],
+        platforms: [],
+        castle: null,
+        enemySpawnPositions: [],
+        keys: {},
+        touch: {},
+        groundLevel: 400,
+        currentLevel: 1,
+        enemiesPerLevel: 5,
+        enemiesKilled: 0,
+        mapWidth: 2000,
+        gameState: 'waiting',
+        levelStarted: false,
+        isTransitioning: false
+    };
+
+    // Initialize game
+    function initMedievalRPG() {
+        console.log('Game.init() called');
+        game.canvas = document.getElementById('gameCanvas');
+        game.ctx = game.canvas.getContext('2d');
+        console.log('Canvas found:', game.canvas ? 'yes' : 'no');
+        
+        game.canvas.width = window.innerWidth;
+        const isMobile = window.innerWidth < 768;
+        game.canvas.height = isMobile ? window.innerHeight - 200 : window.innerHeight;
+        game.groundLevel = game.canvas.height - 100;
+        
+        console.log('Game initialized, canvas size:', game.canvas.width, 'x', game.canvas.height);
+        setupInput();
+        updateUI();
+        startGameLoop();
+        console.log('Game initialization complete');
+    }
+
+    // Input setup
+    function setupInput() {
+        // Keyboard events
+        document.addEventListener('keydown', (e) => {
+            game.keys[e.code] = true;
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            game.keys[e.code] = false;
+        });
+        
+        // Touch events for mobile
+        const canvas = game.canvas;
+        canvas.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            const touch = e.touches[0];
+            const rect = canvas.getBoundingClientRect();
+            const x = touch.clientX - rect.left;
+            const y = touch.clientY - rect.top;
+            
+            // Check which button was pressed
+            if (y > canvas.height - 200) {
+                if (x < 140) {
+                    // D-pad area
+                    if (x < 60) game.keys['ArrowLeft'] = true;
+                    else if (x > 80) game.keys['ArrowRight'] = true;
+                    if (y < canvas.height - 140) game.keys['ArrowUp'] = true;
+                } else if (x > canvas.width - 200) {
+                    // Action buttons
+                    if (y > canvas.height - 140) game.keys['Space'] = true; // Attack
+                    else game.keys['KeyM'] = true; // Magic
+                }
+            }
+        });
+        
+        canvas.addEventListener('touchend', (e) => {
+            game.keys['ArrowLeft'] = false;
+            game.keys['ArrowRight'] = false;
+            game.keys['ArrowUp'] = false;
+            game.keys['Space'] = false;
+            game.keys['KeyM'] = false;
+        });
+    }
+
+    // Game loop
+    let lastFrameTime = 0;
+    function startGameLoop() {
+        console.log('Game loop started');
+        
+        function gameLoop() {
+            const now = performance.now();
+            if (!lastFrameTime) lastFrameTime = now;
+            
+            const deltaTime = now - lastFrameTime;
+            const targetFrameTime = 1000 / GAME_CONFIG.TARGET_FPS;
+            
+            if (deltaTime >= targetFrameTime) {
+                lastFrameTime = now - (deltaTime % targetFrameTime);
+                
+                handlePlayerInput();
+                updateGame();
+                renderGame();
+            }
+            
+            requestAnimationFrame(gameLoop);
+        }
+        
+        gameLoop();
+    }
+
+    // Handle player input
+    function handlePlayerInput() {
+        const p = game.player;
+        
+        // Movement
+        if (game.keys['ArrowLeft'] || game.keys['KeyA']) {
+            p.vx = -GAME_CONFIG.PLAYER_SPEED;
+            p.facing = -1;
+        } else if (game.keys['ArrowRight'] || game.keys['KeyD']) {
+            p.vx = GAME_CONFIG.PLAYER_SPEED;
+            p.facing = 1;
+        } else {
+            p.vx *= GAME_CONFIG.FRICTION;
+        }
+        
+        // Jump
+        if ((game.keys['ArrowUp'] || game.keys['KeyW'] || game.keys['Space']) && p.grounded) {
+            p.vy = GAME_CONFIG.JUMP_FORCE;
+            p.grounded = false;
+        }
+        
+        // Attack
+        if (game.keys['KeyJ'] && p.attackCooldown <= 0) {
+            p.attacking = true;
+            p.attackCooldown = GAME_CONFIG.ATTACK_COOLDOWN;
+        }
+        
+        // Magic
+        if (game.keys['KeyM'] && p.magicCooldown <= 0 && p.mana >= GAME_CONFIG.MAGIC_COST) {
+            castFireball();
+            p.magicCooldown = GAME_CONFIG.MAGIC_COOLDOWN;
+            p.mana -= GAME_CONFIG.MAGIC_COST;
+        }
+    }
+
+    // Update game logic
+    function updateGame() {
+        const p = game.player;
+        
+        // Apply gravity
+        p.vy += GAME_CONFIG.GRAVITY;
+        
+        // Update position
+        p.x += p.vx;
+        p.y += p.vy;
+        
+        // Ground collision
+        if (p.y + p.h > game.groundLevel) {
+            p.y = game.groundLevel - p.h;
+            p.vy = 0;
+            p.grounded = true;
+        }
+        
+        // Platform collision
+        game.platforms.forEach(platform => {
+            if (p.x + p.w > platform.x && p.x < platform.x + platform.w &&
+                p.y + p.h > platform.y && p.y < platform.y + platform.h) {
+                if (p.vy > 0) {
+                    p.y = platform.y - p.h;
+                    p.vy = 0;
+                    p.grounded = true;
+                }
+            }
+        });
+        
+        // Keep player in bounds
+        if (p.x < 0) p.x = 0;
+        if (p.x + p.w > game.mapWidth) p.x = game.mapWidth - p.w;
+        
+        // Update cooldowns
+        p.attackCooldown = Math.max(0, p.attackCooldown - 1);
+        p.magicCooldown = Math.max(0, p.magicCooldown - 1);
+        p.attacking = p.attackCooldown > 20;
+        
+        // Mana regeneration
+        p.mana = Math.min(p.maxMana, p.mana + 0.1);
+        
+        // Check for level up
+        checkLevelUp();
+        
+        // Only run game logic when playing
+        if (game.gameState !== 'playing') return;
+        
+        // Update enemies
+        game.enemies.forEach(enemy => {
+            // Simple AI: move towards player
+            const dx = p.x - enemy.x;
+            if (Math.abs(dx) < 200) {
+                enemy.vx = dx > 0 ? enemy.speed : -enemy.speed;
+            } else {
+                enemy.vx *= 0.9; // Friction
+            }
+            
+            // Apply gravity to enemies
+            enemy.vy += GAME_CONFIG.GRAVITY;
+            
+            // Update enemy position
+            enemy.x += enemy.vx;
+            enemy.y += enemy.vy;
+            
+            // Ground collision for enemies
+            if (enemy.y + enemy.h > game.groundLevel) {
+                enemy.y = game.groundLevel - enemy.h;
+                enemy.vy = 0;
+            }
+            
+            // Platform collision for enemies
+            game.platforms.forEach(platform => {
+                if (enemy.x + enemy.w > platform.x && enemy.x < platform.x + platform.w &&
+                    enemy.y + enemy.h > platform.y && enemy.y < platform.y + platform.h) {
+                    if (enemy.vy > 0) {
+                        enemy.y = platform.y - enemy.h;
+                        enemy.vy = 0;
+                    }
+                }
+            });
+            
+            // Enemy attack player
+            if (Math.abs(p.x - enemy.x) < 50 && Math.abs(p.y - enemy.y) < 50) {
+                if (enemy.attackCooldown <= 0) {
+                    p.health -= enemy.damage;
+                    enemy.attackCooldown = enemy.attackCooldownMax;
+                }
+            }
+            
+            // Update enemy attack cooldown
+            enemy.attackCooldown = Math.max(0, enemy.attackCooldown - 1);
+        });
+        
+        // Update projectiles
+        game.projectiles = game.projectiles.filter(proj => {
+            proj.x += proj.vx;
+            proj.y += proj.vy;
+            proj.life--;
+            
+            // Check projectile collision with enemies
+            game.enemies.forEach(enemy => {
+                if (proj.x + proj.w > enemy.x && proj.x < enemy.x + enemy.w &&
+                    proj.y + proj.h > enemy.y && proj.y < enemy.y + enemy.h) {
+                    enemy.health -= p.magicDamage;
+                    if (enemy.health <= 0) {
+                        game.enemies = game.enemies.filter(e => e !== enemy);
+                        game.enemiesKilled++;
+                        p.exp += enemy.expReward;
+                        p.gold += enemy.goldReward;
+                    }
+                    return false; // Remove projectile
+                }
+            });
+            
+            return proj.life > 0;
+        });
+        
+        // Castle collision
+        if (game.castle && p.x + p.w > game.castle.x && p.x < game.castle.x + game.castle.w &&
+            p.y + p.h > game.castle.y && p.y < game.castle.y + game.castle.h && game.gameState === 'playing') {
+            console.log('Castle collision detected! Triggering next level...');
+            console.log('Player position:', p.x, p.y, 'Castle position:', game.castle.x, game.castle.y);
+            console.log('Game state before collision:', game.gameState);
+            game.gameState = 'levelComplete';
+            showPopup(p.x, p.y - 50, 'VICTORY!', '#00ff00');
+            setTimeout(() => {
+                console.log('Calling nextLevel()...');
+                nextLevel();
+            }, 2000);
+        }
+    }
+
+    // Check for level up
+    function checkLevelUp() {
+        const p = game.player;
+        if (p.exp >= p.expNext) {
+            p.level++;
+            p.exp -= p.expNext;
+            p.expNext = Math.floor(p.expNext * 1.2); // 20% increase per level
+            
+            // Increase stats
+            p.maxHealth += 10;
+            p.health = p.maxHealth; // Full heal on level up
+            p.maxMana += 5;
+            p.mana = p.maxMana; // Full mana on level up
+            
+            // Increase damage
+            p.meleeDamage = Math.floor(p.meleeDamage * 1.1); // 10% increase
+            p.magicDamage = Math.floor(p.magicDamage * 1.15); // 15% increase
+            
+            showPopup(p.x, p.y - 50, `LEVEL UP! ${p.level}`, '#ffaa00');
+            console.log(`Player leveled up to ${p.level}!`);
+        }
+    }
+
+    // Render game
+    function renderGame() {
+        const ctx = game.ctx;
+        const p = game.player;
+        
+        // Clear canvas
+        ctx.clearRect(0, 0, game.canvas.width, game.canvas.height);
+        
+        // Camera
+        const cameraX = Math.max(0, Math.min(p.x - game.canvas.width / 2, game.mapWidth - game.canvas.width));
+        
+        ctx.save();
+        ctx.translate(-cameraX, 0);
+        
+        // Background
+        ctx.fillStyle = '#87CEEB';
+        ctx.fillRect(0, 0, game.mapWidth, game.groundLevel);
+        
+        // Draw background objects (trees, clouds, etc.)
+        drawBackgroundObjects(ctx, cameraX);
+        
+        // Ground
+        ctx.fillStyle = '#8B4513';
+        ctx.fillRect(0, game.groundLevel, game.mapWidth, 100);
+        
+        // Draw platforms
+        ctx.fillStyle = '#654321';
+        game.platforms.forEach(platform => {
+            ctx.fillRect(platform.x, platform.y, platform.w, platform.h);
+        });
+        
+        // Draw enemies
+        ctx.fillStyle = '#ff0000';
+        game.enemies.forEach(enemy => {
+            ctx.fillRect(enemy.x, enemy.y, enemy.w, enemy.h);
+        });
+        
+        // Draw player
+        ctx.fillStyle = p.attacking ? '#ff0000' : '#0000ff';
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        
+        // Draw castle
+        if (game.castle) {
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(game.castle.x, game.castle.y, game.castle.w, game.castle.h);
+            
+            // Draw castle flag
+            ctx.fillStyle = '#ff0000';
+            ctx.fillRect(game.castle.flag.x, game.castle.flag.y, game.castle.flag.w, game.castle.flag.h);
+        }
+        
+        // Draw projectiles
+        ctx.fillStyle = '#ffaa00';
+        game.projectiles.forEach(proj => {
+            ctx.fillRect(proj.x, proj.y, proj.w, proj.h);
+        });
+        
+        ctx.restore();
+        
+        updateUI();
+    }
+
+    // Draw background objects
+    function drawBackgroundObjects(ctx, cameraX) {
+        // Draw clouds
+        ctx.fillStyle = '#ffffff';
+        for (let i = 0; i < 5; i++) {
+            const x = (i * 400 + cameraX * 0.5) % game.mapWidth;
+            const y = 50 + Math.sin(i) * 20;
+            ctx.beginPath();
+            ctx.arc(x, y, 30, 0, Math.PI * 2);
+            ctx.arc(x + 30, y, 25, 0, Math.PI * 2);
+            ctx.arc(x + 60, y, 30, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        
+        // Draw trees
+        ctx.fillStyle = '#228B22';
+        for (let i = 0; i < 8; i++) {
+            const x = (i * 250 + cameraX * 0.8) % game.mapWidth;
+            const y = game.groundLevel - 80;
+            
+            // Tree trunk
+            ctx.fillStyle = '#8B4513';
+            ctx.fillRect(x + 15, y + 40, 10, 40);
+            
+            // Tree leaves
+            ctx.fillStyle = '#228B22';
+            ctx.beginPath();
+            ctx.arc(x + 20, y + 30, 25, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
+
+    // Update UI
+    function updateUI() {
+        const p = game.player;
+        
+        // Update HUD elements
+        const elements = {
+            level: p.level,
+            dungeonLevel: game.currentLevel,
+            enemiesLeft: game.enemiesPerLevel - game.enemiesKilled,
+            health: Math.floor(p.health),
+            mana: Math.floor(p.mana),
+            exp: p.exp,
+            expNext: p.expNext,
+            gold: p.gold,
+            potions: p.potions
+        };
+        
+        Object.entries(elements).forEach(([id, value]) => {
+            const element = document.getElementById(id);
+            if (element) element.textContent = value;
+        });
+        
+        // Update bars
+        const healthFill = document.getElementById('healthFill');
+        const manaFill = document.getElementById('manaFill');
+        const expFill = document.getElementById('expFill');
+        
+        if (healthFill) healthFill.style.width = (p.health / p.maxHealth * 100) + '%';
+        if (manaFill) manaFill.style.width = (p.mana / p.maxMana * 100) + '%';
+        if (expFill) expFill.style.width = (p.exp / p.expNext * 100) + '%';
+        
+        // Update start button
+        const btn = document.getElementById('startBtn');
+        if (btn) {
+            btn.textContent = `Start Level ${game.currentLevel}`;
+            btn.style.display = game.gameState === 'waiting' ? 'block' : 'none';
+        }
+    }
+
+    // Show popup
+    function showPopup(x, y, text, color) {
+        const popup = document.createElement('div');
+        popup.className = 'popup';
+        popup.textContent = text;
+        popup.style.left = (x - (game.player.x - game.canvas.width / 2)) + 'px';
+        popup.style.top = y + 'px';
+        popup.style.color = color;
+        document.body.appendChild(popup);
+        
+        setTimeout(() => popup.remove(), 1000);
+    }
+
+    // Cast fireball
+    function castFireball() {
+        const p = game.player;
+        const proj = {
+            x: p.x + (p.facing > 0 ? p.w : 0),
+            y: p.y + p.h / 2,
+            vx: p.facing * 8,
+            vy: 0,
+            w: 8, h: 8,
+            life: GAME_CONFIG.PROJECTILE_LIFE,
+            maxLife: GAME_CONFIG.PROJECTILE_LIFE,
+            type: 'fireball'
+        };
+        game.projectiles.push(proj);
+    }
+
+    // Start level
+    function startLevel() {
+        console.log('startLevel() called. gameState:', game.gameState);
+        if (game.gameState !== 'waiting' && game.gameState !== 'levelComplete') {
+            console.log('startLevel blocked - invalid gameState:', game.gameState);
+            return;
+        }
+        
+        console.log('Starting level...');
+        // Reset player to starting position
+        Object.assign(game.player, {
+            x: 100, y: 300, vx: 0, vy: 0, grounded: false, facing: 1
+        });
+        
+        game.gameState = 'playing';
+        game.levelStarted = true;
+        game.enemiesKilled = 0;
+        console.log('Game state set to playing');
+        
+        // Create platforms
+        createPlatforms();
+        
+        // Create enemies
+        createEnemies();
+        
+        // Create castle
+        game.castle = {
+            x: game.mapWidth - 300,
+            y: game.groundLevel - 300,
+            w: 300, h: 300,
+            flag: { x: game.mapWidth - 150, y: game.groundLevel - 350, w: 20, h: 30 }
+        };
+        console.log('Castle created at:', game.castle.x, game.castle.y, 'size:', game.castle.w, 'x', game.castle.h);
+        
+        console.log('Level elements created');
+        updateUI();
+        console.log('startLevel complete!');
+    }
+
+    // Create platforms
+    function createPlatforms() {
+        game.platforms = [
+            { x: 300, y: game.groundLevel - 100, w: 150, h: 20 },
+            { x: 600, y: game.groundLevel - 150, w: 150, h: 20 },
+            { x: 900, y: game.groundLevel - 120, w: 150, h: 20 },
+            { x: 1200, y: game.groundLevel - 180, w: 150, h: 20 },
+            { x: 1500, y: game.groundLevel - 140, w: 150, h: 20 }
+        ];
+    }
+
+    // Create enemies
+    function createEnemies() {
+        game.enemies = [];
+        const level = game.currentLevel;
+        
+        // Progressive difficulty scaling
+        const baseEnemies = 3;
+        const enemiesPerLevel = Math.min(15, baseEnemies + Math.floor(level / 3));
+        const enemyHealth = Math.floor(30 + (level * 5));
+        const enemyDamage = Math.floor(8 + (level * 2));
+        const enemySpeed = 0.8 + (level * 0.1);
+        const expReward = Math.floor(15 + (level * 3));
+        const goldReward = Math.floor(8 + (level * 2));
+        
+        console.log(`Level ${level}: Creating ${enemiesPerLevel} enemies with ${enemyHealth} HP, ${enemyDamage} damage`);
+        
+        for (let i = 0; i < enemiesPerLevel; i++) {
+            const enemy = {
+                x: 400 + (i * (game.mapWidth - 800) / enemiesPerLevel),
+                y: game.groundLevel - 60,
+                w: 30, h: 40,
+                vx: 0, vy: 0,
+                health: enemyHealth,
+                maxHealth: enemyHealth,
+                damage: enemyDamage,
+                speed: enemySpeed,
+                expReward: expReward,
+                goldReward: goldReward,
+                attackCooldown: 0,
+                attackCooldownMax: Math.max(30, 90 - (level * 2)) // Faster attacks at higher levels
+            };
+            game.enemies.push(enemy);
+        }
+        
+        game.enemiesPerLevel = enemiesPerLevel;
+    }
+
+    // Next level
+    function nextLevel() {
+        console.log('nextLevel() called. isTransitioning:', game.isTransitioning);
+        if (game.isTransitioning) {
+            console.log('Already transitioning, returning...');
+            return;
+        }
+        
+        console.log('Starting level transition...');
+        game.isTransitioning = true;
+        game.gameState = 'levelComplete';
+        showPopup(game.canvas.width/2, game.canvas.height/2, `Level ${game.currentLevel} Complete!`, '#00ff00');
+        
+        setTimeout(() => {
+            console.log('nextLevel setTimeout callback executing...');
+            game.currentLevel++;
+            console.log('Current level incremented to:', game.currentLevel);
+            
+            // Check if player has reached the final level (100)
+            if (game.currentLevel > 100) {
+                console.log('Reached final level!');
+                showPopup(game.canvas.width/2, game.canvas.height/2, '🎉 CONGRATULATIONS! You have completed all 100 levels! 🎉', '#ffaa00');
+                setTimeout(() => {
+                    showPopup(game.canvas.width/2, game.canvas.height/2, 'You are the ultimate champion!', '#00ff00');
+                }, 3000);
+                game.isTransitioning = false;
+                return;
+            }
+            
+            game.enemiesPerLevel = Math.min(10, 5 + Math.floor(game.currentLevel / 2));
+            console.log('Enemies per level set to:', game.enemiesPerLevel);
+            showPopup(game.canvas.width/2, game.canvas.height/2, `Dungeon Level ${game.currentLevel}`, '#ffaa00');
+            
+            // Reset player
+            Object.assign(game.player, {
+                x: 100, y: 300, vx: 0, vy: 0, grounded: false, facing: 1
+            });
+            console.log('Player reset to starting position');
+            
+            // Clear level data
+            game.enemies = [];
+            game.projectiles = [];
+            game.enemySpawnPositions = [];
+            game.platforms = [];
+            game.castle = null;
+            game.levelStarted = false;
+            game.isTransitioning = false;
+            console.log('Level data cleared');
+            
+            // Automatically start the next level
+            console.log('Calling startLevel()...');
+            startLevel();
+            
+            updateUI();
+            console.log('Level transition complete!');
+        }, 2000);
+    }
+
+    // Make functions globally available
+    window.initMedievalRPG = initMedievalRPG;
+    window.startLevel = startLevel;
+    window.nextLevel = nextLevel;
+
+    // Global functions for Blazor interop
+    window.startLevel = () => {
+        console.log('startLevel called from Blazor');
+        startLevel();
+    };
+    
+    window.showInventory = () => {
+        console.log('showInventory called from Blazor');
+        if (game && game.canvas) {
+            showPopup(game.player.x, game.player.y - 50, 'Inventory Opened!', '#00ff00');
+        }
+    };
+    
+    window.hideInventory = () => {
+        console.log('hideInventory called from Blazor');
+        if (game && game.canvas) {
+            showPopup(game.player.x, game.player.y - 50, 'Inventory Closed!', '#00ff00');
+        }
+    };
+    
+    window.equipWeapon = (name, damage) => {
+        console.log('equipWeapon called from Blazor:', name, damage);
+        if (game && game.canvas) {
+            game.player.meleeDamage = damage;
+            showPopup(game.player.x, game.player.y - 50, `Equipped ${name}!`, '#00ff00');
+        }
+    };
+    
+    window.equipArmor = (name, defense) => {
+        console.log('equipArmor called from Blazor:', name, defense);
+        if (game && game.canvas) {
+            // Armor defense could be implemented here
+            showPopup(game.player.x, game.player.y - 50, `Equipped ${name}!`, '#00ff00');
+        }
+    };
+    
+    window.useItem = (name, effect) => {
+        console.log('useItem called from Blazor:', name, effect);
+        if (game && game.canvas) {
+            showPopup(game.player.x, game.player.y - 50, `Used ${name}!`, '#00ff00');
+        }
+    };
+    
+    window.useMagicItem = (name, description) => {
+        console.log('useMagicItem called from Blazor:', name, description);
+        if (game && game.canvas) {
+            showPopup(game.player.x, game.player.y - 50, `Used ${name}!`, '#00ff00');
+        }
+    };
+
+    console.log('Game JavaScript loaded successfully');
+}
+</script>
+
 <div id="gameContainer">
     <Inventory @bind-IsVisible="inventoryVisible" PlayerLevel="@GameState.PlayerLevel" />
     <canvas id="gameCanvas"></canvas>
@@ -21,6 +733,59 @@
         </div>
         <button id="inventoryBtn" @onclick="ToggleInventory">📦</button>
         <button id="startBtn" @onclick="StartLevel">Start Level 1</button>
+        <button id="controlsBtn" @onclick="ToggleControlsLegend">❓</button>
+    </div>
+    
+    <!-- Controls Legend -->
+    <div id="controlsLegend" class="controls-legend" style="display: @(controlsLegendVisible ? "block" : "none");">
+        <div class="legend-header">
+            <h3>🎮 Game Controls</h3>
+            <button class="close-btn" @onclick="ToggleControlsLegend">×</button>
+        </div>
+        <div class="legend-content">
+            <div class="control-group">
+                <h4>Movement</h4>
+                <div class="control-item">
+                    <span class="key">WASD</span> or <span class="key">Arrow Keys</span>
+                    <span class="description">Move character</span>
+                </div>
+                <div class="control-item">
+                    <span class="key">Space</span> or <span class="key">W</span>
+                    <span class="description">Jump</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <h4>Combat</h4>
+                <div class="control-item">
+                    <span class="key">J</span>
+                    <span class="description">Attack (melee)</span>
+                </div>
+                <div class="control-item">
+                    <span class="key">M</span>
+                    <span class="description">Cast fireball (magic)</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <h4>Game</h4>
+                <div class="control-item">
+                    <span class="key">📦</span>
+                    <span class="description">Open inventory</span>
+                </div>
+                <div class="control-item">
+                    <span class="key">❓</span>
+                    <span class="description">Show/hide controls</span>
+                </div>
+            </div>
+            <div class="control-group">
+                <h4>Objective</h4>
+                <div class="control-item">
+                    <span class="description">Reach the castle to complete the level!</span>
+                </div>
+                <div class="control-item">
+                    <span class="description">Defeat enemies for EXP and gold</span>
+                </div>
+            </div>
+        </div>
     </div>
     
     <div id="mobileControls">
@@ -256,6 +1021,123 @@
         transform: scale(1.05);
     }
     
+    #controlsBtn {
+        position: absolute;
+        top: 120px;
+        right: 20px;
+        background: rgba(139, 69, 19, 0.9);
+        color: white;
+        border: none;
+        padding: 10px 15px;
+        border-radius: 5px;
+        cursor: pointer;
+        font-family: 'Courier New', monospace;
+        font-weight: bold;
+        font-size: 18px;
+        pointer-events: auto;
+        z-index: 16;
+        transition: all 0.2s ease;
+    }
+    
+    #controlsBtn:hover {
+        background: rgba(139, 69, 19, 1);
+        transform: scale(1.05);
+    }
+    
+    .controls-legend {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0, 0, 0, 0.95);
+        border: 3px solid #8B4513;
+        border-radius: 15px;
+        padding: 20px;
+        color: white;
+        font-family: 'Courier New', monospace;
+        z-index: 100;
+        max-width: 400px;
+        width: 90%;
+        max-height: 80vh;
+        overflow-y: auto;
+    }
+    
+    .legend-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        border-bottom: 2px solid #8B4513;
+        padding-bottom: 10px;
+    }
+    
+    .legend-header h3 {
+        margin: 0;
+        color: #ffaa00;
+        font-size: 18px;
+    }
+    
+    .close-btn {
+        background: none;
+        border: none;
+        color: white;
+        font-size: 24px;
+        cursor: pointer;
+        padding: 0;
+        width: 30px;
+        height: 30px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 50%;
+        transition: background-color 0.2s;
+    }
+    
+    .close-btn:hover {
+        background: rgba(255, 255, 255, 0.2);
+    }
+    
+    .legend-content {
+        font-size: 14px;
+    }
+    
+    .control-group {
+        margin-bottom: 20px;
+    }
+    
+    .control-group h4 {
+        color: #ffaa00;
+        margin: 0 0 10px 0;
+        font-size: 16px;
+        border-bottom: 1px solid #8B4513;
+        padding-bottom: 5px;
+    }
+    
+    .control-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+        padding: 5px 0;
+    }
+    
+    .key {
+        background: #8B4513;
+        color: white;
+        padding: 3px 8px;
+        border-radius: 5px;
+        font-weight: bold;
+        font-size: 12px;
+        min-width: 60px;
+        text-align: center;
+        display: inline-block;
+    }
+    
+    .description {
+        color: #cccccc;
+        font-size: 13px;
+    }
+    
     .popup {
         position: absolute;
         top: 50%;
@@ -296,6 +1178,16 @@
             top: 20px; 
             right: 20px; 
         }
+        
+        #controlsBtn {
+            display: block;
+        }
+    }
+    
+    @@media (max-width: 767px) {
+        #controlsBtn {
+            display: none;
+        }
     }
 </style>
 
@@ -307,14 +1199,57 @@
     {
         if (firstRender)
         {
-            await JSRuntime.InvokeVoidAsync("initMedievalRPG");
-            await LoadGameState();
+            try
+            {
+                // Wait a bit for the JavaScript to load
+                await Task.Delay(500);
+                
+                await JSRuntime.InvokeVoidAsync("initMedievalRPG");
+                await LoadGameState();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error initializing game: {ex.Message}");
+            }
         }
     }
     
-    private void ToggleInventory()
+    private async Task SyncPlayerLevel()
+    {
+        try
+        {
+            var currentLevel = await JSRuntime.InvokeAsync<int>("eval", "game.player.level");
+            if (currentLevel != GameState.PlayerLevel)
+            {
+                GameState.PlayerLevel = currentLevel;
+                await SaveGameState();
+                StateHasChanged();
+                Console.WriteLine($"Synced player level to {currentLevel}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error syncing player level: {ex.Message}");
+        }
+    }
+    
+    private async Task ToggleInventory()
     {
         inventoryVisible = !inventoryVisible;
+        
+        if (inventoryVisible)
+        {
+            // Sync player level when opening inventory
+            await SyncPlayerLevel();
+        }
+        
+        StateHasChanged();
+    }
+
+    private bool controlsLegendVisible = false;
+    private void ToggleControlsLegend()
+    {
+        controlsLegendVisible = !controlsLegendVisible;
         StateHasChanged();
     }
     
@@ -358,7 +1293,7 @@
         public int PlayerLevel { get; set; } = 1;
         public int CurrentDungeonLevel { get; set; } = 1;
         public int TotalGold { get; set; } = 0;
-        public int TotalEnemiesKilled { get; set; } = 0;
+        public int TotalEnemiesKilled { get; set; } = 1;
         public DateTime LastSaveTime { get; set; } = DateTime.Now;
         public Dictionary<string, int> ItemCounts { get; set; } = new();
         public List<string> UnlockedItems { get; set; } = new();

@@ -1,3 +1,6 @@
+console.log('medieval-rpg.js loaded successfully');
+console.log('Game constants section reached');
+
 // Game Constants
 const GAME_CONFIG = {
     GRAVITY: 0.5,
@@ -88,7 +91,8 @@ const game = {
     enemiesKilled: 0,
     mapWidth: 2000,
     gameState: 'waiting',
-    levelStarted: false
+    levelStarted: false,
+    isTransitioning: false
 };
 
 // Utility Functions
@@ -458,6 +462,7 @@ const Level = {
             w: 300, h: 300,
             flag: { x: game.mapWidth - 150, y: game.groundLevel - 350, w: 20, h: 30 }
         };
+        console.log('Castle created at:', game.castle.x, game.castle.y, 'size:', game.castle.w, 'x', game.castle.h);
     },
     
     createSpawnPositions: () => {
@@ -643,12 +648,15 @@ const Renderer = {
 // Main Game Controller
 const Game = {
     init: () => {
+        console.log('Game.init() called');
         game.canvas = document.getElementById('gameCanvas');
         game.ctx = game.canvas.getContext('2d');
+        console.log('Canvas found:', game.canvas ? 'yes' : 'no');
         Game.resize();
         Input.setup();
         UI.update();
         Game.loop();
+        console.log('Game initialization complete');
     },
     
     resize: () => {
@@ -659,8 +667,14 @@ const Game = {
     },
     
     startLevel: () => {
-        if (game.gameState !== 'waiting') return;
+        console.log('startLevel() called. gameState:', game.gameState);
+        // Allow starting from 'levelComplete' state for auto-progression
+        if (game.gameState !== 'waiting' && game.gameState !== 'levelComplete') {
+            console.log('startLevel blocked - invalid gameState:', game.gameState);
+            return;
+        }
         
+        console.log('Starting level...');
         // Reset player to starting position
         Object.assign(game.player, {
             x: 100, y: 300, vx: 0, vy: 0, grounded: false, facing: 1
@@ -669,12 +683,15 @@ const Game = {
         game.gameState = 'playing';
         game.levelStarted = true;
         game.enemiesKilled = 0;
+        console.log('Game state set to playing');
         
         Level.createPlatforms();
         Level.createCastle();
         Level.createSpawnPositions();
+        console.log('Level elements created');
         
         UI.update();
+        console.log('startLevel complete!');
     },
     
     update: () => {
@@ -704,9 +721,15 @@ const Game = {
         // Castle collision
         if (game.castle && p.x + p.w > game.castle.x && p.x < game.castle.x + game.castle.w &&
             p.y + p.h > game.castle.y && p.y < game.castle.y + game.castle.h && game.gameState === 'playing') {
+            console.log('Castle collision detected! Triggering next level...');
+            console.log('Player position:', p.x, p.y, 'Castle position:', game.castle.x, game.castle.y);
+            console.log('Game state before collision:', game.gameState);
             game.gameState = 'levelComplete';
             UI.showPopup(p.x, p.y - 50, 'VICTORY!', '#00ff00');
-            setTimeout(() => Game.nextLevel(), 2000);
+            setTimeout(() => {
+                console.log('Calling Game.nextLevel()...');
+                Game.nextLevel();
+            }, 2000);
         }
         
         // Cooldowns and regen
@@ -717,31 +740,43 @@ const Game = {
     },
     
     nextLevel: () => {
-        // Prevent multiple calls
-        if (game.gameState === 'levelComplete') return;
+        console.log('nextLevel() called. isTransitioning:', game.isTransitioning);
+        // Prevent multiple calls by checking if we're already processing a level transition
+        if (game.isTransitioning) {
+            console.log('Already transitioning, returning...');
+            return;
+        }
         
+        console.log('Starting level transition...');
+        game.isTransitioning = true;
         game.gameState = 'levelComplete';
         UI.showPopup(game.canvas.width/2, game.canvas.height/2, `Level ${game.currentLevel} Complete!`, '#00ff00');
         
         setTimeout(() => {
+            console.log('nextLevel setTimeout callback executing...');
             game.currentLevel++;
+            console.log('Current level incremented to:', game.currentLevel);
             
             // Check if player has reached the final level (100)
             if (game.currentLevel > 100) {
+                console.log('Reached final level!');
                 UI.showPopup(game.canvas.width/2, game.canvas.height/2, '🎉 CONGRATULATIONS! You have completed all 100 levels! 🎉', '#ffaa00');
                 setTimeout(() => {
                     UI.showPopup(game.canvas.width/2, game.canvas.height/2, 'You are the ultimate champion!', '#00ff00');
                 }, 3000);
+                game.isTransitioning = false;
                 return;
             }
             
             game.enemiesPerLevel = Math.min(10, 5 + Math.floor(game.currentLevel / 2));
+            console.log('Enemies per level set to:', game.enemiesPerLevel);
             UI.showPopup(game.canvas.width/2, game.canvas.height/2, `Dungeon Level ${game.currentLevel}`, '#ffaa00');
             
             // Reset player
             Object.assign(game.player, {
                 x: 100, y: 300, vx: 0, vy: 0, grounded: false, facing: 1
             });
+            console.log('Player reset to starting position');
             
             // Clear level data
             game.enemies = [];
@@ -750,11 +785,15 @@ const Game = {
             game.platforms = [];
             game.castle = null;
             game.levelStarted = false;
+            game.isTransitioning = false;
+            console.log('Level data cleared');
             
             // Automatically start the next level
+            console.log('Calling Game.startLevel()...');
             Game.startLevel();
             
             UI.update();
+            console.log('Level transition complete!');
         }, 2000);
     },
     
@@ -804,7 +843,10 @@ const Game = {
     
     loop: () => {
         const now = performance.now();
-        if (!Game.lastFrameTime) Game.lastFrameTime = now;
+        if (!Game.lastFrameTime) {
+            Game.lastFrameTime = now;
+            console.log('Game loop started');
+        }
         
         const deltaTime = now - Game.lastFrameTime;
         const targetFrameTime = 1000 / GAME_CONFIG.TARGET_FPS;
@@ -823,7 +865,13 @@ const Game = {
 
 // Initialize game
 function initMedievalRPG() {
-    Game.init();
+    console.log('initMedievalRPG() called from Blazor');
+    try {
+        Game.init();
+        console.log('Game.init() completed successfully');
+    } catch (error) {
+        console.error('Error in initMedievalRPG:', error);
+    }
 }
 
 // Inventory System
@@ -915,5 +963,13 @@ window.startLevel = () => {
     Game.startLevel();
 };
 window.initMedievalRPG = () => {
-    Game.init();
-}; 
+    console.log('window.initMedievalRPG() called');
+    try {
+        Game.init();
+        console.log('Game.init() completed successfully from window function');
+    } catch (error) {
+        console.error('Error in window.initMedievalRPG:', error);
+    }
+};
+
+console.log('medieval-rpg.js file completely loaded'); 
